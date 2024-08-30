@@ -11,6 +11,10 @@ from typing import Callable, Literal, Tuple, Union
 
 _PYCHECKPOINT_DIRNAME_TEMPLATE = "{identifier}_[{date}]_{hash}_pycheckpoint"
 _PYCHECKPOINT_FILENAME_TEMPLATE = "{arg_repr}_[{date}]_{arg_hash}_pycheckpoint.{ext}"
+_PYCHECKPOINT_TMP_FILENAME_TEMPLATE = "{arg_repr}_[{date}]_{arg_hash}_pycheckpoint.incomplete.{ext}"
+_PYCHECKPOINT_DATETIME_FORMAT = "%m-%d-%Y-%H-%M-%S"
+_PYCHECKPOINT_DEFAULT_LOGGING_MESSAGE = "[{cur_time}] Pycheckpoint: Loading checkpoint created at {date}. Function: {func}, Args: {args}"
+
 
 def _pycheckpoint_validify_filename(filename: str) -> str:
     return re.sub(r'[^\w_\-\.\(\)\[\]\{\}\+=,~]', '', filename)
@@ -45,6 +49,7 @@ def pycheckpoint(
         serialization: Union[Literal["pickle", "pandas.csv", "pandas.parquet", "json"], Tuple[Callable, Callable, str]]="pickle",
         serialize_function_kwargs: Tuple[dict, dict]=({}, {}),
         canonical_args: bool=True,
+        log_message_template: str=_PYCHECKPOINT_DEFAULT_LOGGING_MESSAGE,
     )-> Callable:
     """
     Decorator to checkpoint a function. The function will be checkpointed based on the function name, the function bytecode, and the arguments. 
@@ -69,7 +74,21 @@ def pycheckpoint(
         serialize_function_kwargs (Tuple[dict, dict], optional): Keyword arguments for serialization and deserialization functions. Defaults to ({}, {}).
         canonical_args (bool, optional): If True, the function will be checkpointed based on the canonical arguments. If true, all positional arguments 
             and kwargs are represented in a unified form. Defaults to True.
-
+        log_message_template (str, optional): Log message template. Defaults to _PYCHECKPOINT_DEFAULT_LOGGING_MESSAGE. Supported placeholders are:
+            - cur_time: Current time
+            - file_path: File path
+            - filename: Filename
+            - date: Date
+                - year: Year
+                - month: Month
+                - day: Day
+                - hour: Hour
+                - minute: Minute
+                - second: Second
+                - weekday: Weekday
+            - func: Function name
+            - func_hash: Function hash
+            - args: Arguments
     """
     def decorator(func: Callable):
         def wrapper(*args, **kwargs):
@@ -136,7 +155,7 @@ def pycheckpoint(
                 arg_hash_obj = hashlib.sha256(pickle.dumps((args_tuple, kwargs_tuple)))
                 arg_hash = arg_hash_obj.hexdigest()
 
-            date = datetime.now().strftime("%m-%d-%Y-%H-%M-%S")
+            date = datetime.now().strftime(_PYCHECKPOINT_DATETIME_FORMAT)
             if not os.path.exists(checkpoint_path):
                 os.makedirs(checkpoint_path)
             
@@ -161,8 +180,32 @@ def pycheckpoint(
 
 
             for file in os.listdir(checkpoint_dir_path):
-                if file.startswith(f"{all_args_repr}_") and file.endswith(f"_{arg_hash}_pycheckpoint.{filename_extension}"):
-                    print(f"Pycheckpoint: Loading checkpoint: {file}")
+                prefix, suffix = f"{all_args_repr}_", f"_{arg_hash}_pycheckpoint.{filename_extension}"
+                if file.startswith(prefix) and file.endswith(suffix):
+                    checkpoint_date = file[len(prefix):-(len(suffix))]
+                    assert checkpoint_date.startswith("[") and checkpoint_date.endswith("]"), f"Invalid checkpoint date: {checkpoint_date} in file {os.path.join(checkpoint_dir_path, file)}"
+                    checkpoint_date = checkpoint_date[1:-1]
+                    try: 
+                        checkpoint_date = datetime.strptime(checkpoint_date, _PYCHECKPOINT_DATETIME_FORMAT)
+                    except ValueError:
+                        raise ValueError(f"Invalid checkpoint date format: {checkpoint_date} in file {os.path.join(checkpoint_dir_path, file)}")
+                    
+                    print(log_message_template.format(
+                        cur_time = datetime.now(),
+                        file_path=os.path.join(checkpoint_dir_path, file),
+                        filename = file,
+                        date = checkpoint_date,
+                        year = checkpoint_date.year,
+                        month = checkpoint_date.month,
+                        day = checkpoint_date.day,
+                        hour = checkpoint_date.hour,
+                        minute = checkpoint_date.minute,
+                        second = checkpoint_date.second,
+                        weekday = checkpoint_date.weekday(),
+                        func = identifier,
+                        func_hash = func_hash,
+                        args = all_args_repr,
+                    ))
                     return deserialize_function(os.path.join(checkpoint_dir_path, file))
 
             checkpoint_filename = _PYCHECKPOINT_FILENAME_TEMPLATE.format(
@@ -172,8 +215,19 @@ def pycheckpoint(
                 ext=filename_extension,
             )
             checkpoint_file_path = os.path.join(checkpoint_dir_path, checkpoint_filename)
+            tmp_checkpoint_filename = _PYCHECKPOINT_TMP_FILENAME_TEMPLATE.format(
+                arg_repr=all_args_repr,
+                arg_hash=arg_hash,
+                date=date,
+                ext=filename_extension,
+            )
+            tmp_checkpoint_file_path = os.path.join(checkpoint_dir_path, tmp_checkpoint_filename)
             result = func(*args, **kwargs)
-            serialize_function(result, checkpoint_file_path)
+
+
+            serialize_function(result, tmp_checkpoint_file_path)
+            
+            os.replace(tmp_checkpoint_file_path, checkpoint_file_path)
 
             return result
         return wrapper
