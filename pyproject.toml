@@ -7,7 +7,7 @@ name = "pychequepoint"
 authors = [
   { name="Yurun Yuan", email="yurun.yuan@outlook.com" },
 ]
-version = "0.0.2"
+version = "0.0.3"
 description = "A simple tool that automate checkpointing. "
 readme = "README.md"
 requires-python = ">=3.8"
