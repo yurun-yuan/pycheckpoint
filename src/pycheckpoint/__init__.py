@@ -181,7 +181,7 @@ def pycheckpoint(
 
             for file in os.listdir(checkpoint_dir_path):
                 prefix, suffix = f"{all_args_repr}_", f"_{arg_hash}_pycheckpoint.{filename_extension}"
-                if file.startswith(prefix) and file.endswith(suffix):
+                if file.endswith(suffix):
                     checkpoint_date = file[len(prefix):-(len(suffix))]
                     assert checkpoint_date.startswith("[") and checkpoint_date.endswith("]"), f"Invalid checkpoint date: {checkpoint_date} in file {os.path.join(checkpoint_dir_path, file)}"
                     checkpoint_date = checkpoint_date[1:-1]
